@@ -7,7 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use tokio::net::UdpSocket;
 use tokio::task;
-use tokio::task::JoinSet;
+
 
 use crate::cache_utils::ResponseExpiry;
 use moka::future::Cache;
@@ -20,7 +20,7 @@ mod serialization;
 const DEFAULT_DNS_SERVER: (Ipv4Addr, u16) = (Ipv4Addr::new(198, 41, 0, 4), 53);
 const CACHE_CAPACITY: u64 = 1_000_000;
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main]
 async fn main() -> Result<()> {
     let cache = Cache::builder()
         .max_capacity(CACHE_CAPACITY)
@@ -34,8 +34,6 @@ async fn main() -> Result<()> {
 
     local
         .run_until(async {
-            let mut set = JoinSet::new();
-
             loop {
                 let mut request_bytes = [0; 512];
                 let src = match socket.recv_from(&mut request_bytes).await {
@@ -49,17 +47,11 @@ async fn main() -> Result<()> {
                     }
                 };
 
-                set.spawn_local(handle_request(request_bytes, src, socket, cache.clone()));
-
-                if let Some(Ok(res)) = set.join_next().await {
-                    match res {
-                        Ok(()) => println!("Query for '{src}' fulfilled."),
-                        Err(e) => println!("Couldn't fulfill query, error: {:#?}", e),
-                    }
-                }
+                local.spawn_local(handle_request(request_bytes, src, socket, cache.clone()));
             }
         })
         .await;
+    
 
     Ok(())
 }
@@ -69,7 +61,7 @@ async fn handle_request(
     src: SocketAddr,
     socket: &UdpSocket,
     cache: Cache<Question, Packet>,
-) -> Result<()> {
+) {
     let response = resolve_request(&request_bytes, cache).await;
 
     let response_bytes = match response.to_bytes() {
@@ -84,10 +76,12 @@ async fn handle_request(
         }
     };
 
-    socket.send_to(&response_bytes, src).await?;
-    println!("Responded to '{src}'");
-
-    Ok(())
+    if let Err(e) = socket.send_to(&response_bytes, src).await {
+        println!("Couldn't respond to '{src}', error: {:#?}", e);
+    } else {
+        println!("Responded to '{src}'");
+    }
+    
 }
 
 async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packet>) -> Packet {
@@ -129,7 +123,7 @@ async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packe
         return recorded_response;
     }
 
-    let mut response = match resolve(question, DEFAULT_DNS_SERVER).await {
+    let response = match resolve(question, DEFAULT_DNS_SERVER).await {
         Ok(mut resolved) => {
             resolved.header.id = request.header.id;
             println!("Resolved question {:#?}", question);
@@ -158,6 +152,9 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
     let mut rng = rand::thread_rng();
 
     loop {
+        dbg!(server);
+        dbg!(&question.name);
+        
         let response = {
             let mut packet = Packet::empty();
             packet.header.id = rng.gen();
@@ -175,26 +172,23 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
             return Ok(response);
         }
 
-        if !response.authorities.is_empty() && response.header.rcode == ResponseCode::NoError && question.name == "." && question.record_type == RecordType::Address {
-            return Ok(response);
-        }
-
         if response.header.rcode == ResponseCode::NameError {
             return Ok(response);
         }
 
-        if let Some(new_ns) = response.first_resolved_authority_for(&question.name).next() {
+        if let Some(new_ns) = response.resolved_authorities_for(&question.name).next() {
             server = (new_ns.to_owned(), 53);
             continue;
         }
 
         let first_authority = {
             let mut authorities = response.authorities_for(&question.name);
+            
             authorities.next()
         };
-
+        
         let new_ns_name = match first_authority {
-            Some((name, _host)) => name.to_string(),
+            Some((_name, host)) => host.to_string(),
             None => return Ok(response),
         };
 
@@ -204,7 +198,7 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
         )
             .await?;
 
-        server = match response_for_ns.first_ipv4_address() {
+        server = match response_for_ns.first_answer() {
             Some(addr) => (addr, 53),
             None => return Ok(response),
         };

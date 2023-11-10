@@ -187,7 +187,7 @@ impl Packet {
     pub fn authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
-    ) -> impl Iterator<Item = (&'a str, &'a str)> {
+    ) -> impl Iterator<Item=(&'a str, &'a str)> {
         self.authorities
             .iter()
             .filter_map(|r| match r.data {
@@ -195,21 +195,23 @@ impl Packet {
                 _ => None,
             })
             .filter(|(domain, _host)| domain_name.ends_with(*domain))
+            .filter(|(_domain, host)| **host != *domain_name)
     }
 
-    pub fn first_resolved_authority_for<'a>(
+    pub fn resolved_authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
-    ) -> impl Iterator<Item = Ipv4Addr> + 'a {
-        self.authorities_for(domain_name).flat_map(|(_, host)| {
-            self.resources.iter().filter_map(move |r| match r.data {
-                RecordData::Address(addr) if r.domain_name == host => Some(addr),
-                _ => None,
+    ) -> impl Iterator<Item=Ipv4Addr> + 'a {
+        self.authorities_for(domain_name)
+            .flat_map(|(_, host)| {
+                self.resources.iter().filter_map(move |r| match r.data {
+                    RecordData::Address(addr) if r.domain_name == host => Some(addr),
+                    _ => None,
+                })
             })
-        })
     }
 
-    pub fn first_ipv4_address(&self) -> Option<Ipv4Addr> {
+    pub fn first_answer(&self) -> Option<Ipv4Addr> {
         self.answers
             .iter()
             .filter_map(|r| match r.data {
