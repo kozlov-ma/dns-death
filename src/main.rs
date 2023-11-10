@@ -144,13 +144,6 @@ async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packe
         }
     };
 
-    if let Some(q) = response.questions.get(0) {
-        if q.record_type == RecordType::Unknown(0) {
-            response.header.rcode = ResponseCode::ServerFailure;
-            response.questions = Vec::new();
-        }
-    }
-
     cache.insert(question.to_owned(), response.clone()).await;
 
     response
@@ -182,6 +175,10 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
             return Ok(response);
         }
 
+        if !response.authorities.is_empty() && response.header.rcode == ResponseCode::NoError && question.name == "." && question.record_type == RecordType::Address {
+            return Ok(response);
+        }
+
         if response.header.rcode == ResponseCode::NameError {
             return Ok(response);
         }
@@ -205,7 +202,7 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
             &Question::new(new_ns_name, RecordType::Address),
             DEFAULT_DNS_SERVER,
         )
-        .await?;
+            .await?;
 
         server = match response_for_ns.first_ipv4_address() {
             Some(addr) => (addr, 53),

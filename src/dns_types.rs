@@ -2,7 +2,7 @@ use int_enum::IntEnum;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone, IntEnum)]
+#[derive(Eq, PartialEq, Debug, Hash, Copy, Clone, IntEnum)]
 #[repr(u8)]
 pub enum ResponseCode {
     NoError = 0,
@@ -13,7 +13,7 @@ pub enum ResponseCode {
     Refused = 5,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Header {
     pub id: u16,
 
@@ -140,7 +140,7 @@ impl Record {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Packet {
     pub header: Header,
     pub questions: Vec<Question>,

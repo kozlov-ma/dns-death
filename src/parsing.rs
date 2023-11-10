@@ -100,7 +100,7 @@ impl<'a> DnsParser<'a> {
 
             let len = self.at(local_pos)?;
 
-            // two most significant bits are set => it is a jump
+            // two most significant bits are set => it is a continuation pointer
             if (len & 0xC0) == 0xC0 {
                 if jumps == 0 {
                     self.seek(local_pos + 2)?;

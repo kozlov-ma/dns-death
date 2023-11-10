@@ -1,4 +1,4 @@
-use crate::dns_types::{Header, Packet, Question, Record, RecordData};
+use crate::dns_types::{Header, Packet, Question, Record, RecordData, RecordType};
 use anyhow::{ensure, Result};
 
 #[derive(Clone, Debug)]
@@ -103,6 +103,8 @@ impl DnsSerializer {
     }
 
     pub fn write_question(&mut self, question: &Question) -> Result<()> {
+        ensure!(question.record_type != RecordType::Unknown(0), "Invalid Query/Record type: '0");
+        
         self.write_domain_name(&question.name)?;
 
         self.write_u16((&question.record_type).into())?;
