@@ -1,4 +1,4 @@
-use crate::dns_types::{Header, Packet, Question, Record, RecordData, RecordType, ResponseCode};
+use crate::dns_types::{Header, Packet, Query, Record, RecordData, RecordType, ResponseCode};
 use anyhow::{ensure, Result};
 use bit_vec::BitVec;
 use int_enum::IntEnum;
@@ -138,13 +138,13 @@ impl<'a> DnsParser<'a> {
         }
     }
 
-    pub fn read_question(&mut self) -> Result<Question> {
+    pub fn read_query(&mut self) -> Result<Query> {
         let name = self.read_domain_name()?;
         let type_code = self.read_u16()?;
         let record_type = RecordType::from_int(type_code);
         let _cls = self.read_u16()?;
 
-        Ok(Question::new(name, record_type))
+        Ok(Query::new(name, record_type))
     }
 
     pub fn read_header(&mut self) -> Result<Header> {
@@ -166,10 +166,10 @@ impl<'a> DnsParser<'a> {
         header.z = second << 4 & 0b0111;
         header.rcode = ResponseCode::from_int(second & 0x0F)?;
 
-        header.questions = self.read_u16()?;
+        header.queries = self.read_u16()?;
         header.answers = self.read_u16()?;
         header.authorities = self.read_u16()?;
-        header.resources = self.read_u16()?;
+        header.additional = self.read_u16()?;
 
         Ok(header)
     }
@@ -235,8 +235,8 @@ impl<'a> DnsParser<'a> {
         let mut result = Packet::empty();
         result.header = self.read_header()?;
 
-        for _ in 0..result.header.questions {
-            result.questions.push(self.read_question()?);
+        for _ in 0..result.header.queries {
+            result.queries.push(self.read_query()?);
         }
 
         for _ in 0..result.header.answers {
@@ -245,8 +245,8 @@ impl<'a> DnsParser<'a> {
         for _ in 0..result.header.authorities {
             result.authorities.push(self.read_record()?);
         }
-        for _ in 0..result.header.resources {
-            result.resources.push(self.read_record()?);
+        for _ in 0..result.header.additional {
+            result.additional.push(self.read_record()?);
         }
 
         Ok(result)

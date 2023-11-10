@@ -1,4 +1,4 @@
-use crate::dns_types::{Header, Packet, Question, Record, RecordData, RecordType};
+use crate::dns_types::{Header, Packet, Query, Record, RecordData, RecordType};
 use anyhow::{ensure, Result};
 
 #[derive(Clone, Debug)]
@@ -94,20 +94,23 @@ impl DnsSerializer {
                 | ((header.recursion_available as u8) << 7),
         )?;
 
-        self.write_u16(header.questions)?;
+        self.write_u16(header.queries)?;
         self.write_u16(header.answers)?;
         self.write_u16(header.authorities)?;
-        self.write_u16(header.resources)?;
+        self.write_u16(header.additional)?;
 
         Ok(())
     }
 
-    pub fn write_question(&mut self, question: &Question) -> Result<()> {
-        ensure!(question.record_type != RecordType::Unknown(0), "Invalid Query/Record type: '0");
-        
-        self.write_domain_name(&question.name)?;
+    pub fn write_query(&mut self, query: &Query) -> Result<()> {
+        ensure!(
+            query.record_type != RecordType::Unknown(0),
+            "Invalid Query/Record type: '0"
+        );
 
-        self.write_u16((&question.record_type).into())?;
+        self.write_domain_name(&query.name)?;
+
+        self.write_u16((&query.record_type).into())?;
         self.write_u16(1)?;
 
         Ok(())
@@ -156,15 +159,19 @@ impl DnsSerializer {
     pub fn write_packet(&mut self, packet: &Packet) -> Result<()> {
         self.write_header(&packet.actual_header())?;
 
-        for question in packet.questions.iter() {
-            self.write_question(question)?;
+        for query in packet
+            .queries
+            .iter()
+            .filter(|q| q.record_type != RecordType::Unknown(0))
+        {
+            self.write_query(query)?;
         }
 
         let all_records = packet
             .answers
             .iter()
             .chain(packet.authorities.iter())
-            .chain(packet.resources.iter());
+            .chain(packet.additional.iter());
         for rec in all_records {
             self.write_record(rec)?;
         }

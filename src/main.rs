@@ -1,5 +1,5 @@
-use crate::dns_types::{Packet, Question, RecordType, ResponseCode};
-use anyhow::{Result};
+use crate::dns_types::{Packet, Query, RecordType, ResponseCode};
+use anyhow::Result;
 use async_recursion::async_recursion;
 use rand::Rng;
 
@@ -7,7 +7,6 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use tokio::net::UdpSocket;
 use tokio::task;
-
 
 use crate::cache_utils::ResponseExpiry;
 use moka::future::Cache;
@@ -51,7 +50,6 @@ async fn main() -> Result<()> {
             }
         })
         .await;
-    
 
     Ok(())
 }
@@ -60,9 +58,10 @@ async fn handle_request(
     request_bytes: [u8; 512],
     src: SocketAddr,
     socket: &UdpSocket,
-    cache: Cache<Question, Packet>,
+    cache: Cache<Query, Packet>,
 ) {
     let response = resolve_request(&request_bytes, cache).await;
+    dbg!(&response);
 
     let response_bytes = match response.to_bytes() {
         Ok(bytes) => bytes,
@@ -81,10 +80,9 @@ async fn handle_request(
     } else {
         println!("Responded to '{src}'");
     }
-    
 }
 
-async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packet>) -> Packet {
+async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Query, Packet>) -> Packet {
     let mut response = Packet::empty();
     response.header.is_response = true;
     response.header.recursion_desired = true;
@@ -108,25 +106,25 @@ async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packe
         return response;
     }
 
-    if request.questions.len() != 1 {
+    if request.queries.len() != 1 {
         println!(
-            "Got a request with multiple questions, not implemented: {:#?}",
+            "Got a request with multiple queries, not implemented: {:#?}",
             request
         );
         response.header.rcode = ResponseCode::NotImplemented;
         return response;
     }
 
-    let question = &request.questions[0];
-    if let Some(mut recorded_response) = cache.get(question).await {
+    let query = &request.queries[0];
+    if let Some(mut recorded_response) = cache.get(query).await {
         recorded_response.header.id = request.header.id;
         return recorded_response;
     }
 
-    let response = match resolve(question, DEFAULT_DNS_SERVER).await {
+    let response = match resolve(query, DEFAULT_DNS_SERVER).await {
         Ok(mut resolved) => {
             resolved.header.id = request.header.id;
-            println!("Resolved question {:#?}", question);
+            println!("Resolved query {:#?}", query);
 
             resolved
         }
@@ -138,13 +136,13 @@ async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packe
         }
     };
 
-    cache.insert(question.to_owned(), response.clone()).await;
+    cache.insert(query.to_owned(), response.clone()).await;
 
     response
 }
 
 #[async_recursion(? Send)]
-pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Result<Packet> {
+pub async fn resolve(query: &Query, start_server: (Ipv4Addr, u16)) -> Result<Packet> {
     let mut server = start_server;
 
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
@@ -152,13 +150,10 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
     let mut rng = rand::thread_rng();
 
     loop {
-        dbg!(server);
-        dbg!(&question.name);
-        
         let response = {
             let mut packet = Packet::empty();
             packet.header.id = rng.gen();
-            packet.questions.push(question.clone());
+            packet.queries.push(query.clone());
 
             socket.connect(server).await?;
             socket.send(&packet.to_bytes()?).await?;
@@ -176,27 +171,27 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
             return Ok(response);
         }
 
-        if let Some(new_ns) = response.resolved_authorities_for(&question.name).next() {
+        if let Some(new_ns) = response.resolved_authorities_for(&query.name).next() {
             server = (new_ns.to_owned(), 53);
             continue;
         }
 
         let first_authority = {
-            let mut authorities = response.authorities_for(&question.name);
-            
+            let mut authorities = response.authorities_for(&query.name);
+
             authorities.next()
         };
-        
+
         let new_ns_name = match first_authority {
             Some((_name, host)) => host.to_string(),
             None => return Ok(response),
         };
 
         let response_for_ns = resolve(
-            &Question::new(new_ns_name, RecordType::Address),
+            &Query::new(new_ns_name, RecordType::Address),
             DEFAULT_DNS_SERVER,
         )
-            .await?;
+        .await?;
 
         server = match response_for_ns.first_answer() {
             Some(addr) => (addr, 53),

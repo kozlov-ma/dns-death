@@ -29,10 +29,10 @@ pub struct Header {
     pub z: u8,
     pub recursion_available: bool,
 
-    pub questions: u16,
+    pub queries: u16,
     pub answers: u16,
     pub authorities: u16,
-    pub resources: u16,
+    pub additional: u16,
 }
 
 impl Header {
@@ -52,10 +52,10 @@ impl Header {
             z: 0,
             recursion_available: false,
 
-            questions: 0,
+            queries: 0,
             answers: 0,
             authorities: 0,
-            resources: 0,
+            additional: 0,
         }
     }
 }
@@ -92,12 +92,12 @@ impl RecordType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Question {
+pub struct Query {
     pub name: String,
     pub record_type: RecordType,
 }
 
-impl Question {
+impl Query {
     pub fn new(name: String, record_type: RecordType) -> Self {
         Self { name, record_type }
     }
@@ -143,20 +143,20 @@ impl Record {
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct Packet {
     pub header: Header,
-    pub questions: Vec<Question>,
+    pub queries: Vec<Query>,
     pub answers: Vec<Record>,
     pub authorities: Vec<Record>,
-    pub resources: Vec<Record>,
+    pub additional: Vec<Record>,
 }
 
 impl Packet {
     pub fn empty() -> Self {
         Packet {
             header: Header::empty(),
-            questions: Vec::new(),
+            queries: Vec::new(),
             answers: Vec::new(),
             authorities: Vec::new(),
-            resources: Vec::new(),
+            additional: Vec::new(),
         }
     }
 
@@ -176,10 +176,10 @@ impl Packet {
     /// Returns a new header with the exact values as current header, but changes qdcount, ancount, nscount and arcount to their actual values
     pub fn actual_header(&self) -> Header {
         let mut header = self.header.clone();
-        header.questions = self.questions.len() as u16;
+        header.queries = self.queries.len() as u16;
         header.answers = self.answers.len() as u16;
         header.authorities = self.authorities.len() as u16;
-        header.resources = self.resources.len() as u16;
+        header.additional = self.additional.len() as u16;
 
         header
     }
@@ -187,7 +187,7 @@ impl Packet {
     pub fn authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
-    ) -> impl Iterator<Item=(&'a str, &'a str)> {
+    ) -> impl Iterator<Item = (&'a str, &'a str)> {
         self.authorities
             .iter()
             .filter_map(|r| match r.data {
@@ -201,14 +201,13 @@ impl Packet {
     pub fn resolved_authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
-    ) -> impl Iterator<Item=Ipv4Addr> + 'a {
-        self.authorities_for(domain_name)
-            .flat_map(|(_, host)| {
-                self.resources.iter().filter_map(move |r| match r.data {
-                    RecordData::Address(addr) if r.domain_name == host => Some(addr),
-                    _ => None,
-                })
+    ) -> impl Iterator<Item = Ipv4Addr> + 'a {
+        self.authorities_for(domain_name).flat_map(|(_, host)| {
+            self.additional.iter().filter_map(move |r| match r.data {
+                RecordData::Address(addr) if r.domain_name == host => Some(addr),
+                _ => None,
             })
+        })
     }
 
     pub fn first_answer(&self) -> Option<Ipv4Addr> {
