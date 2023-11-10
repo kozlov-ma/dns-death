@@ -202,20 +202,6 @@ impl Packet {
         packet
     }
 
-    pub fn authorities(
-        id: u16,
-        queries: Vec<Query>,
-        authorities: Vec<Record>,
-        additional: Vec<Record>,
-    ) -> Self {
-        let mut packet = Packet::response(id);
-        packet.queries = queries;
-        packet.authorities = authorities;
-        packet.additional = additional;
-
-        packet
-    }
-
     pub fn error(id: u16, rcode: ResponseCode) -> Self {
         let mut packet = Packet::response(id);
         packet.header.rcode = rcode;
@@ -266,15 +252,5 @@ impl Packet {
                 _ => None,
             })
         })
-    }
-
-    pub fn first_answer(&self) -> Option<Ipv4Addr> {
-        self.answers
-            .iter()
-            .filter_map(|r| match r.data {
-                RecordData::Address(addr) => Some(addr),
-                _ => None,
-            })
-            .next()
     }
 }
