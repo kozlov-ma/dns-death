@@ -108,7 +108,7 @@ impl DnsSerializer {
             "Invalid Query/Record type: '0"
         );
 
-        self.write_domain_name(&query.name)?;
+        self.write_domain_name(&query.domain_name)?;
 
         self.write_u16((&query.record_type).into())?;
         self.write_u16(1)?;
@@ -146,6 +146,15 @@ impl DnsSerializer {
                 self.write_u16(0)?;
 
                 self.write_domain_name(host)?;
+
+                let size = self.pos - (pos + 2);
+                self.set_u16(pos, size as u16)?;
+            }
+            RecordData::CanonicalName(ref cname) => {
+                let pos = self.pos;
+                self.write_u16(0)?;
+
+                self.write_domain_name(cname)?;
 
                 let size = self.pos - (pos + 2);
                 self.set_u16(pos, size as u16)?;

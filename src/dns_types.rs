@@ -1,5 +1,6 @@
 use int_enum::IntEnum;
 
+use rand::Rng;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Eq, PartialEq, Debug, Hash, Copy, Clone, IntEnum)]
@@ -66,6 +67,7 @@ pub enum RecordType {
     Unknown(u16),
     Address = 1,
     NameServer = 2,
+    CanonicalName = 5,
     Ipv6Address = 28,
 }
 
@@ -75,6 +77,7 @@ impl From<&RecordType> for u16 {
             RecordType::Unknown(code) => *code,
             RecordType::Address => 1,
             RecordType::NameServer => 2,
+            RecordType::CanonicalName => 5,
             RecordType::Ipv6Address => 28,
         }
     }
@@ -85,6 +88,7 @@ impl RecordType {
         match value {
             1 => RecordType::Address,
             2 => RecordType::NameServer,
+            5 => RecordType::CanonicalName,
             28 => RecordType::Ipv6Address,
             v => RecordType::Unknown(v),
         }
@@ -93,13 +97,16 @@ impl RecordType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Query {
-    pub name: String,
+    pub domain_name: String,
     pub record_type: RecordType,
 }
 
 impl Query {
     pub fn new(name: String, record_type: RecordType) -> Self {
-        Self { name, record_type }
+        Self {
+            domain_name: name,
+            record_type,
+        }
     }
 }
 
@@ -109,6 +116,7 @@ pub enum RecordData {
     Unknown(u16, Vec<u8>) = 0,
     Address(Ipv4Addr) = 1,
     NameServer(String) = 2,
+    CanonicalName(String) = 5,
     Ipv6Address(Ipv6Addr) = 28,
 }
 
@@ -118,6 +126,7 @@ impl From<&RecordData> for u16 {
             RecordData::Unknown(code, ..) => *code,
             RecordData::Address(..) => 1,
             RecordData::NameServer(..) => 2,
+            RecordData::CanonicalName(..) => 5,
             RecordData::Ipv6Address(..) => 28,
         }
     }
@@ -160,17 +169,66 @@ impl Packet {
         }
     }
 
-    pub fn servfail_bytes(&self) -> Vec<u8> {
+    pub fn query(query: Query) -> Self {
+        let mut rng = rand::thread_rng();
+
         let mut packet = Packet::empty();
-        packet.header.id = self.header.id;
-        packet.header.is_response = true;
-        packet.header.recursion_available = true;
-        packet.header.recursion_desired = true;
-        packet.header.rcode = ResponseCode::ServerFailure;
+        packet.queries.push(query);
+        packet.header.id = rng.gen();
+        packet.header.is_response = false;
+        packet.header = packet.actual_header();
+
+        packet
+    }
+
+    pub fn response(id: u16) -> Self {
+        let mut header = Header::empty();
+        header.id = id;
+        header.recursion_available = true;
+        header.recursion_desired = true;
+        header.is_response = true;
+
+        let mut packet = Packet::empty();
+        packet.header = header;
+
+        packet
+    }
+
+    pub fn answers(id: u16, queries: Vec<Query>, answers: Vec<Record>) -> Self {
+        let mut packet = Packet::response(id);
+        packet.queries = queries;
+        packet.answers = answers;
+
+        packet
+    }
+
+    pub fn authorities(
+        id: u16,
+        queries: Vec<Query>,
+        authorities: Vec<Record>,
+        additional: Vec<Record>,
+    ) -> Self {
+        let mut packet = Packet::response(id);
+        packet.queries = queries;
+        packet.authorities = authorities;
+        packet.additional = additional;
+
+        packet
+    }
+
+    pub fn error(id: u16, rcode: ResponseCode) -> Self {
+        let mut packet = Packet::response(id);
+        packet.header.rcode = rcode;
+
+        packet
+    }
+
+    pub fn error_bytes(&self, id: u16, rcode: ResponseCode) -> Vec<u8> {
+        let packet = Packet::error(id, rcode);
 
         packet
             .to_bytes()
-            .expect("This packet surely can be serialized.")
+            .expect("This packet is guaranteed to be serializable.")
     }
 
     /// Returns a new header with the exact values as current header, but changes qdcount, ancount, nscount and arcount to their actual values

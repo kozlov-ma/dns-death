@@ -218,6 +218,11 @@ impl<'a> DnsParser<'a> {
 
                 RecordData::NameServer(ns)
             }
+            RecordType::CanonicalName => {
+                let cname = self.read_domain_name()?;
+
+                RecordData::CanonicalName(cname)
+            }
             RecordType::Unknown(code) => {
                 let mut bytes = Vec::with_capacity(data_len as usize);
                 for _ in 0..data_len {
