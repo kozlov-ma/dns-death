@@ -1,4 +1,3 @@
-use anyhow::{bail, Result};
 use int_enum::IntEnum;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -64,7 +63,7 @@ impl Header {
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum RecordType {
-    Unknown(u16) = 0,
+    Unknown(u16),
     Address = 1,
     NameServer = 2,
     Ipv6Address = 28,
@@ -82,18 +81,17 @@ impl From<&RecordType> for u16 {
 }
 
 impl RecordType {
-    pub fn from_int(value: u16) -> Result<RecordType> {
+    pub fn from_int(value: u16) -> RecordType {
         match value {
-            0 => Ok(RecordType::Unknown(0)),
-            1 => Ok(RecordType::Address),
-            2 => Ok(RecordType::NameServer),
-            28 => Ok(RecordType::Ipv6Address),
-            wrong => bail!("Record type '{wrong}' does not exist"),
+            1 => RecordType::Address,
+            2 => RecordType::NameServer,
+            28 => RecordType::Ipv6Address,
+            v => RecordType::Unknown(v),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Question {
     pub name: String,
     pub record_type: RecordType,
@@ -101,7 +99,7 @@ pub struct Question {
 
 impl Question {
     pub fn new(name: String, record_type: RecordType) -> Self {
-        Question { name, record_type }
+        Self { name, record_type }
     }
 }
 
@@ -162,6 +160,19 @@ impl Packet {
         }
     }
 
+    pub fn servfail_bytes(&self) -> Vec<u8> {
+        let mut packet = Packet::empty();
+        packet.header.id = self.header.id;
+        packet.header.is_response = true;
+        packet.header.recursion_available = true;
+        packet.header.recursion_desired = true;
+        packet.header.rcode = ResponseCode::ServerFailure;
+
+        packet
+            .to_bytes()
+            .expect("This packet surely can be serialized.")
+    }
+
     /// Returns a new header with the exact values as current header, but changes qdcount, ancount, nscount and arcount to their actual values
     pub fn actual_header(&self) -> Header {
         let mut header = self.header.clone();
@@ -173,33 +184,29 @@ impl Packet {
         header
     }
 
-    pub fn first_authority_for_qname<'a>(&'a self, qname: &'a str) -> Option<&'a str> {
+    pub fn authorities_for<'a>(
+        &'a self,
+        domain_name: &'a str,
+    ) -> impl Iterator<Item = (&'a str, &'a str)> {
         self.authorities
             .iter()
             .filter_map(|r| match r.data {
-                RecordData::NameServer(ref host) => Some((&r.domain_name, host.as_str())),
+                RecordData::NameServer(ref host) => Some((r.domain_name.as_str(), host.as_str())),
                 _ => None,
             })
-            .filter(|(domain, _host)| qname.ends_with(*domain))
-            .map(|(_domain, host)| host)
-            .next()
+            .filter(|(domain, _host)| domain_name.ends_with(*domain))
     }
 
-    pub fn first_resolved_authority_for_qname<'a>(&'a self, qname: &'a str) -> Option<Ipv4Addr> {
-        self.authorities
-            .iter()
-            .filter_map(|r| match r.data {
-                RecordData::NameServer(ref host) => Some((&r.domain_name, host.as_str())),
+    pub fn first_resolved_authority_for<'a>(
+        &'a self,
+        domain_name: &'a str,
+    ) -> impl Iterator<Item = Ipv4Addr> + 'a {
+        self.authorities_for(domain_name).flat_map(|(_, host)| {
+            self.resources.iter().filter_map(move |r| match r.data {
+                RecordData::Address(addr) if r.domain_name == host => Some(addr),
                 _ => None,
             })
-            .filter(|(domain, _host)| qname.ends_with(*domain))
-            .flat_map(|(_, host)| {
-                self.resources.iter().filter_map(move |r| match r.data {
-                    RecordData::Address(addr) if r.domain_name == host => Some(addr),
-                    _ => None,
-                })
-            })
-            .next()
+        })
     }
 
     pub fn first_ipv4_address(&self) -> Option<Ipv4Addr> {
@@ -207,16 +214,6 @@ impl Packet {
             .iter()
             .filter_map(|r| match r.data {
                 RecordData::Address(addr) => Some(addr),
-                _ => None,
-            })
-            .next()
-    }
-
-    pub fn first_ipv6_address2(&self) -> Option<Ipv6Addr> {
-        self.answers
-            .iter()
-            .filter_map(|r| match r.data {
-                RecordData::Ipv6Address(addr) => Some(addr),
                 _ => None,
             })
             .next()

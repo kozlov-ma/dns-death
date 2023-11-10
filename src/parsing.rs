@@ -131,13 +131,17 @@ impl<'a> DnsParser<'a> {
             self.seek(local_pos)?;
         }
 
-        Ok(itertools::free::join(labels, "."))
+        if !labels.is_empty() {
+            Ok(itertools::free::join(labels, "."))
+        } else {
+            Ok(String::from("."))
+        }
     }
 
     pub fn read_question(&mut self) -> Result<Question> {
         let name = self.read_domain_name()?;
         let type_code = self.read_u16()?;
-        let record_type = RecordType::from_int(type_code).unwrap_or(RecordType::Unknown(type_code));
+        let record_type = RecordType::from_int(type_code);
         let _cls = self.read_u16()?;
 
         Ok(Question::new(name, record_type))
@@ -149,12 +153,12 @@ impl<'a> DnsParser<'a> {
         header.id = self.read_u16()?;
         let first = self.read_u8()?;
         let second = self.read_u8()?;
-        
+
         let flags = BitVec::from_bytes(&[first, second]);
-        
+
         header.is_response = flags[0];
-        header.opcode = (first >> 3) & 0x0F;  
-        
+        header.opcode = (first >> 3) & 0x0F;
+
         header.authoritative_answer = flags[5];
         header.truncated_message = flags[6];
         header.recursion_desired = flags[7];
@@ -174,7 +178,7 @@ impl<'a> DnsParser<'a> {
         let domain = self.read_domain_name()?;
 
         let type_code = self.read_u16()?;
-        let record_type = RecordType::from_int(type_code).unwrap_or(RecordType::Unknown(type_code));
+        let record_type = RecordType::from_int(type_code);
         let _class = self.read_u16()?;
         let ttl = self.read_u32()?;
         let data_len = self.read_u16()?;

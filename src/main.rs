@@ -1,5 +1,5 @@
 use crate::dns_types::{Packet, Question, RecordType, ResponseCode};
-use anyhow::{bail, Result};
+use anyhow::{Result};
 use async_recursion::async_recursion;
 use rand::Rng;
 
@@ -70,19 +70,18 @@ async fn handle_request(
     socket: &UdpSocket,
     cache: Cache<Question, Packet>,
 ) -> Result<()> {
-    let rr = resolve_request(&request_bytes, cache).await;
-    let response = match rr {
-        Ok(resp) => resp,
-        Err(e) => bail!("Failed to resolve request. Error: {:#?}", e),
-    };
+    let response = resolve_request(&request_bytes, cache).await;
 
     let response_bytes = match response.to_bytes() {
         Ok(bytes) => bytes,
-        Err(e) => bail!(
-            "Failed to serialize response {:#?} with error: {:#?}",
-            response,
-            e
-        ),
+        Err(e) => {
+            println!(
+                "Failed to serialize response {:#?} with error: {:#?}",
+                response, e
+            );
+
+            response.servfail_bytes()
+        }
     };
 
     socket.send_to(&response_bytes, src).await?;
@@ -91,10 +90,7 @@ async fn handle_request(
     Ok(())
 }
 
-async fn resolve_request(
-    request_bytes: &[u8; 512],
-    cache: Cache<Question, Packet>,
-) -> Result<Packet> {
+async fn resolve_request(request_bytes: &[u8; 512], cache: Cache<Question, Packet>) -> Packet {
     let mut response = Packet::empty();
     response.header.is_response = true;
     response.header.recursion_desired = true;
@@ -107,7 +103,7 @@ async fn resolve_request(
             response.header.id = rng.gen();
             println!("Couldn't deserialize request. Error: {:#?}", e);
             response.header.rcode = ResponseCode::FormatError;
-            return Ok(response);
+            return response;
         }
     };
 
@@ -115,7 +111,7 @@ async fn resolve_request(
 
     if !request.header.recursion_desired {
         response.header.rcode = ResponseCode::Refused;
-        return Ok(response);
+        return response;
     }
 
     if request.questions.len() != 1 {
@@ -124,16 +120,16 @@ async fn resolve_request(
             request
         );
         response.header.rcode = ResponseCode::NotImplemented;
-        return Ok(response);
+        return response;
     }
 
     let question = &request.questions[0];
     if let Some(mut recorded_response) = cache.get(question).await {
         recorded_response.header.id = request.header.id;
-        return Ok(recorded_response);
+        return recorded_response;
     }
 
-    let response = match resolve(question, DEFAULT_DNS_SERVER).await {
+    let mut response = match resolve(question, DEFAULT_DNS_SERVER).await {
         Ok(mut resolved) => {
             resolved.header.id = request.header.id;
             println!("Resolved question {:#?}", question);
@@ -148,12 +144,19 @@ async fn resolve_request(
         }
     };
 
+    if let Some(q) = response.questions.get(0) {
+        if q.record_type == RecordType::Unknown(0) {
+            response.header.rcode = ResponseCode::ServerFailure;
+            response.questions = Vec::new();
+        }
+    }
+
     cache.insert(question.to_owned(), response.clone()).await;
 
-    Ok(response)
+    response
 }
 
-#[async_recursion(?Send)]
+#[async_recursion(? Send)]
 pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Result<Packet> {
     let mut server = start_server;
 
@@ -183,13 +186,18 @@ pub async fn resolve(question: &Question, start_server: (Ipv4Addr, u16)) -> Resu
             return Ok(response);
         }
 
-        if let Some(new_ns) = response.first_resolved_authority_for_qname(&question.name) {
-            server = (new_ns, 53);
+        if let Some(new_ns) = response.first_resolved_authority_for(&question.name).next() {
+            server = (new_ns.to_owned(), 53);
             continue;
         }
 
-        let new_ns_name = match response.first_authority_for_qname(&question.name) {
-            Some(name) => name.to_string(),
+        let first_authority = {
+            let mut authorities = response.authorities_for(&question.name);
+            authorities.next()
+        };
+
+        let new_ns_name = match first_authority {
+            Some((name, _host)) => name.to_string(),
             None => return Ok(response),
         };
 
