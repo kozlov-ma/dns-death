@@ -84,12 +84,13 @@ async fn response_from_bytes(request_bytes: &[u8; 512], cache: Cache<Query, DnsR
         Ok(request) => request,
     };
 
-    create_response(&request, cache)
-        .await
-        .unwrap_or(Packet::error(
-            request.header.id,
-            ResponseCode::ServerFailure,
-        ))
+    match create_response(&request, cache).await {
+        Ok(r) => r,
+        Err(e) => {
+            println!("Couldn't create response for request, with error: {:#?}", e);
+            Packet::error(request.header.id, ResponseCode::ServerFailure)
+        }
+    }
 }
 
 async fn create_response(request: &Packet, cache: Cache<Query, DnsResult>) -> Result<Packet> {
@@ -134,7 +135,7 @@ async fn resolve_query(
     if let Some(res) = cache.get(&query).await {
         return Ok(res);
     }
-
+    
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
     let response = {
