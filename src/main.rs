@@ -189,6 +189,7 @@ async fn resolve_query(
 
             for auth_addr in addresses {
                 if let Ok(res) = resolve_query(query.clone(), auth_addr, cache.clone()).await {
+                    cache.insert(query.clone(), res.clone()).await;
                     return Ok(res);
                 }
             }
