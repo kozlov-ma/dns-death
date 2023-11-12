@@ -84,7 +84,7 @@ async fn response_from_bytes(request_bytes: &[u8; 512], cache: Cache<Query, DnsR
         Ok(request) => request,
     };
 
-    match create_response(&request, cache).await {
+    match create_response(&request, &cache).await {
         Ok(r) => r,
         Err(e) => {
             println!("Couldn't create response for request, with error: {:#?}", e);
@@ -93,7 +93,7 @@ async fn response_from_bytes(request_bytes: &[u8; 512], cache: Cache<Query, DnsR
     }
 }
 
-async fn create_response(request: &Packet, cache: Cache<Query, DnsResult>) -> Result<Packet> {
+async fn create_response(request: &Packet, cache: &Cache<Query, DnsResult>) -> Result<Packet> {
     if request.queries.len() != 1 {
         return Ok(Packet::error(
             request.header.id,
@@ -106,17 +106,14 @@ async fn create_response(request: &Packet, cache: Cache<Query, DnsResult>) -> Re
     }
 
     let query = &request.queries[0];
-    match resolve_query(query.clone(), ROOT_DNS_SERVER, cache).await? {
-        DnsResult::Answers(answers) => {
-            let response = Packet::answers(request.header.id, request.queries.clone(), answers);
-            Ok(response)
-        }
-        DnsResult::NameError => Ok(Packet::error(request.header.id, ResponseCode::NameError)),
-        DnsResult::ServerFailure => Ok(Packet::error(
-            request.header.id,
-            ResponseCode::ServerFailure,
-        )),
+    if let Some(res) = cache.get(query).await {
+        return Ok(request.response_from_dns_result(res));
     }
+
+    let res = resolve_query(query.clone(), ROOT_DNS_SERVER).await?;
+    cache.insert(query.clone(), res.clone()).await;
+
+    Ok(request.response_from_dns_result(res))
 }
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -127,15 +124,7 @@ pub enum DnsResult {
 }
 
 #[async_recursion]
-async fn resolve_query(
-    query: Query,
-    server: SocketAddr,
-    cache: Cache<Query, DnsResult>,
-) -> Result<DnsResult> {
-    if let Some(res) = cache.get(&query).await {
-        return Ok(res);
-    }
-    
+async fn resolve_query(query: Query, server: SocketAddr) -> Result<DnsResult> {
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
 
     let response = {
@@ -152,25 +141,16 @@ async fn resolve_query(
 
     if !response.answers.is_empty() && response.header.rcode == ResponseCode::NoError {
         let res = DnsResult::Answers(response.answers);
-        cache.insert(query.clone(), res.clone()).await;
         return Ok(res);
     }
 
     if response.header.rcode == ResponseCode::NameError {
         let res = DnsResult::NameError;
-        cache.insert(query.clone(), res.clone()).await;
         return Ok(res);
     }
 
     for authority in response.resolved_authorities_for(&query.domain_name) {
-        if let Ok(res) = resolve_query(
-            query.clone(),
-            SocketAddr::new(IpAddr::V4(authority), 53),
-            cache.clone(),
-        )
-        .await
-        {
-            cache.insert(query.clone(), res.clone()).await;
+        if let Ok(res) = resolve_query(query.clone(), authority).await {
             return Ok(res);
         }
     }
@@ -180,7 +160,7 @@ async fn resolve_query(
         let authority_query = Query::new(host.to_string(), RecordType::Address);
 
         if let Ok(DnsResult::Answers(auth_records)) =
-            resolve_query(authority_query, ROOT_DNS_SERVER, cache.clone()).await
+            resolve_query(authority_query, ROOT_DNS_SERVER).await
         {
             let addresses = auth_records.iter().filter_map(|r| match r.data {
                 RecordData::Address(addr) => Some(SocketAddr::new(IpAddr::V4(addr), 53)),
@@ -189,8 +169,7 @@ async fn resolve_query(
             });
 
             for auth_addr in addresses {
-                if let Ok(res) = resolve_query(query.clone(), auth_addr, cache.clone()).await {
-                    cache.insert(query.clone(), res.clone()).await;
+                if let Ok(res) = resolve_query(query.clone(), auth_addr).await {
                     return Ok(res);
                 }
             }

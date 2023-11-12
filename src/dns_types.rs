@@ -1,7 +1,8 @@
 use int_enum::IntEnum;
 
+use crate::DnsResult;
 use rand::Rng;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 #[derive(Eq, PartialEq, Debug, Hash, Copy, Clone, IntEnum)]
 #[repr(u8)]
@@ -245,12 +246,26 @@ impl Packet {
     pub fn resolved_authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
-    ) -> impl Iterator<Item = Ipv4Addr> + 'a {
+    ) -> impl Iterator<Item = SocketAddr> + 'a {
         self.authorities_for(domain_name).flat_map(|(_, host)| {
             self.additional.iter().filter_map(move |r| match r.data {
-                RecordData::Address(addr) if r.domain_name == host => Some(addr),
+                RecordData::Address(addr) if r.domain_name == host => {
+                    Some(SocketAddr::new(IpAddr::V4(addr), 53))
+                }
+                RecordData::Ipv6Address(addr) if r.domain_name == host => {
+                    Some(SocketAddr::new(IpAddr::V6(addr), 53))
+                }
                 _ => None,
             })
         })
+    }
+    pub fn response_from_dns_result(&self, res: DnsResult) -> Self {
+        match res {
+            DnsResult::Answers(answers) => {
+                Packet::answers(self.header.id, self.queries.clone(), answers)
+            }
+            DnsResult::NameError => Packet::error(self.header.id, ResponseCode::NameError),
+            DnsResult::ServerFailure => Packet::error(self.header.id, ResponseCode::ServerFailure),
+        }
     }
 }
