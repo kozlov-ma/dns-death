@@ -229,10 +229,7 @@ impl Packet {
         header
     }
 
-    pub fn authorities_for<'a>(
-        &'a self,
-        domain_name: &'a str,
-    ) -> impl Iterator<Item = (&'a str, &'a str)> {
+    pub fn authorities_for<'a>(&'a self, domain_name: &'a str) -> impl Iterator<Item = &'a str> {
         self.authorities
             .iter()
             .filter_map(|r| match r.data {
@@ -240,14 +237,15 @@ impl Packet {
                 _ => None,
             })
             .filter(|(domain, _host)| domain_name.ends_with(*domain))
-            .filter(|(_domain, host)| **host != *domain_name)
+            .map(|(_domain, host)| host)
+            .filter(|host| **host != *domain_name)
     }
 
     pub fn resolved_authorities_for<'a>(
         &'a self,
         domain_name: &'a str,
     ) -> impl Iterator<Item = SocketAddr> + 'a {
-        self.authorities_for(domain_name).flat_map(|(_, host)| {
+        self.authorities_for(domain_name).flat_map(|host| {
             self.additional.iter().filter_map(move |r| match r.data {
                 RecordData::Address(addr) if r.domain_name == host => {
                     Some(SocketAddr::new(IpAddr::V4(addr), 53))
@@ -265,7 +263,6 @@ impl Packet {
                 Packet::answers(self.header.id, self.queries.clone(), answers)
             }
             DnsResult::NameError => Packet::error(self.header.id, ResponseCode::NameError),
-            DnsResult::ServerFailure => Packet::error(self.header.id, ResponseCode::ServerFailure),
         }
     }
 }

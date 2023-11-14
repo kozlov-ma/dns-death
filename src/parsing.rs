@@ -181,7 +181,7 @@ impl<'a> DnsParser<'a> {
         let record_type = RecordType::from_int(type_code);
         let _class = self.read_u16()?;
         let ttl = self.read_u32()?;
-        let data_len = self.read_u16()?;
+        let _data_len = self.read_u16()?;
 
         let data = match record_type {
             RecordType::Address => {

@@ -14,7 +14,6 @@ impl Expiry<Query, DnsResult> for DnsResultExpiry {
     ) -> Option<Duration> {
         let secs = match value {
             DnsResult::Answers(records) => records.iter().map(|r| r.ttl).min()?,
-            DnsResult::ServerFailure => 0,
             DnsResult::NameError => 60,
         };
 
