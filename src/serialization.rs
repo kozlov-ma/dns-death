@@ -159,7 +159,8 @@ impl DnsSerializer {
                 let size = self.pos - (pos + 2);
                 self.set_u16(pos, size as u16)?;
             }
-            RecordData::Unknown(_code, ref _bytes) => unreachable!(),
+            // RecordData::Unknown(_code, ref _bytes) => unreachable!(),
+            RecordData::Unknown(..) => unreachable!(),
         }
 
         Ok(self.pos - start_pos)

@@ -114,7 +114,7 @@ impl Query {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(u16)]
 pub enum RecordData {
-    Unknown(u16, Vec<u8>) = 0,
+    Unknown(u16) = 0,
     Address(Ipv4Addr) = 1,
     NameServer(String) = 2,
     CanonicalName(String) = 5,

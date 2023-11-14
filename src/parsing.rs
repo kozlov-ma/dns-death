@@ -224,12 +224,12 @@ impl<'a> DnsParser<'a> {
                 RecordData::CanonicalName(cname)
             }
             RecordType::Unknown(code) => {
-                let mut bytes = Vec::with_capacity(data_len as usize);
-                for _ in 0..data_len {
-                    bytes.push(self.read_u8()?);
-                }
-
-                RecordData::Unknown(code, bytes)
+                // let mut bytes = Vec::with_capacity(data_len as usize);
+                // for _ in 0..data_len {
+                //     bytes.push(self.read_u8()?);
+                // }
+                //
+                RecordData::Unknown(code)
             }
         };
 
@@ -245,13 +245,37 @@ impl<'a> DnsParser<'a> {
         }
 
         for _ in 0..result.header.answers {
-            result.answers.push(self.read_record()?);
+            let record = match self.read_record() {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("Failed to read record, error: {:#?}", e);
+                    return Ok(result);
+                }
+            };
+
+            result.answers.push(record);
         }
         for _ in 0..result.header.authorities {
-            result.authorities.push(self.read_record()?);
+            let record = match self.read_record() {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("Failed to read record, error: {:#?}", e);
+                    return Ok(result);
+                }
+            };
+
+            result.authorities.push(record);
         }
         for _ in 0..result.header.additional {
-            result.additional.push(self.read_record()?);
+            let record = match self.read_record() {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("Failed to read record, error: {:#?}", e);
+                    return Ok(result);
+                }
+            };
+
+            result.additional.push(record);
         }
 
         Ok(result)
