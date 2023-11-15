@@ -20,7 +20,7 @@ mod serialization;
 
 pub const ROOT_DNS_SERVER: SocketAddr =
     SocketAddr::new(IpAddr::V4(Ipv4Addr::new(198, 41, 0, 4)), 53);
-pub const CACHE_CAPACITY: u64 = 1_000_000;
+pub const CACHE_CAPACITY: u64 = 10_000_000;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {

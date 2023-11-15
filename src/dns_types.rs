@@ -133,6 +133,19 @@ impl From<&RecordData> for u16 {
     }
 }
 
+impl RecordData {
+    pub fn is_of_type(&self, record_type: &RecordType) -> bool {
+        u16::from(self) == u16::from(record_type)
+    }
+
+    pub fn as_cname(&self) -> Option<&str> {
+        match self {
+            RecordData::CanonicalName(cname) => Some(cname),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialOrd, PartialEq, Hash, Ord, Eq)]
 pub struct Record {
     pub domain_name: String,

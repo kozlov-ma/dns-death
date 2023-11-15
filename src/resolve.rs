@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_recursion::async_recursion;
 use moka::future::Cache;
 use std::net::{IpAddr, SocketAddr};
+
 use tokio::net::UdpSocket;
 use tokio::task::JoinSet;
 
@@ -23,12 +24,14 @@ pub async fn query(query: Query, cache: Cache<Query, DnsResult>) -> Result<DnsRe
     Ok(DnsResult::Answers(answers))
 }
 
+#[async_recursion]
 async fn cached(query: Query, cache: Cache<Query, DnsResult>) -> Result<DnsResult> {
     if let Some(res) = cache.get(&query).await {
         return Ok(res);
     }
 
     let res = recursive(&query, ROOT_DNS_SERVER, cache.clone()).await?;
+
     cache.insert(query, res.clone()).await;
 
     Ok(res)
@@ -55,7 +58,9 @@ async fn recursive(
     };
 
     if !response.answers.is_empty() && response.header.rcode == ResponseCode::NoError {
-        let res = DnsResult::Answers(response.answers);
+        let answers = cnames(query.clone(), response.answers, cache.clone()).await?;
+
+        let res = DnsResult::Answers(answers);
         return Ok(res);
     }
 
@@ -68,13 +73,96 @@ async fn recursive(
 }
 
 #[async_recursion]
+async fn cnames(
+    query: Query,
+    answers: Vec<Record>,
+    cache: Cache<Query, DnsResult>,
+) -> Result<Vec<Record>> {
+    let mut answers = answers;
+    const MAX_CNAME_JUMPS: usize = 20;
+    if !answers
+        .iter()
+        .any(|r| r.data.is_of_type(&query.record_type))
+    {
+        let mut cname_tasks = JoinSet::new();
+
+        for cname in answers
+            .iter()
+            .filter_map(|r| r.data.as_cname())
+            .map(|s| s.to_string())
+        {
+            cname_tasks.spawn(from_cname(
+                query.clone(),
+                cname,
+                cache.clone(),
+                MAX_CNAME_JUMPS,
+            ));
+        }
+
+        while let Some(res) = cname_tasks.join_next().await {
+            let resolved_cname = res??;
+            if let DnsResult::Answers(ans) = resolved_cname {
+                answers.extend(ans);
+            }
+        }
+    }
+
+    Ok(answers)
+}
+
+#[async_recursion]
+async fn from_cname(
+    query: Query,
+    cname: String,
+    cache: Cache<Query, DnsResult>,
+    jumps_left: usize,
+) -> Result<DnsResult> {
+    if jumps_left == 0 {
+        return Ok(DnsResult::NameError);
+    }
+
+    let res = cached(
+        Query::new(cname.to_string(), query.record_type),
+        cache.clone(),
+    )
+    .await?;
+
+    match res {
+        DnsResult::Answers(answers) => {
+            if answers
+                .iter()
+                .any(|r| r.data.is_of_type(&query.record_type))
+            {
+                Ok(DnsResult::Answers(answers))
+            } else if let Some(new_cname) = answers
+                .iter()
+                .filter_map(|r| r.data.as_cname())
+                .filter(|c| c != &cname)
+                .last()
+            {
+                from_cname(
+                    query,
+                    new_cname.to_string(),
+                    cache.clone(),
+                    jumps_left.saturating_sub(1),
+                )
+                .await
+            } else {
+                Ok(DnsResult::Answers(answers))
+            }
+        }
+        res => Ok(res),
+    }
+}
+
+#[async_recursion]
 async fn from_authorities(
     query: &Query,
     response: &Packet,
     cache: Cache<Query, DnsResult>,
 ) -> Result<DnsResult> {
     for authority in response.resolved_authorities_for(&query.domain_name) {
-        if let Ok(res) = recursive(&query, authority, cache.clone()).await {
+        if let Ok(res) = recursive(query, authority, cache.clone()).await {
             return Ok(res);
         }
     }
