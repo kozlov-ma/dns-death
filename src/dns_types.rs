@@ -38,7 +38,7 @@ pub struct Header {
 }
 
 impl Header {
-    pub fn empty() -> Header {
+    pub fn new() -> Header {
         Header {
             id: 0,
 
@@ -175,7 +175,7 @@ pub struct Packet {
 impl Packet {
     pub fn empty() -> Self {
         Packet {
-            header: Header::empty(),
+            header: Header::new(),
             queries: Vec::new(),
             answers: Vec::new(),
             authorities: Vec::new(),
@@ -196,7 +196,7 @@ impl Packet {
     }
 
     pub fn response(id: u16) -> Self {
-        let mut header = Header::empty();
+        let mut header = Header::new();
         header.id = id;
         header.recursion_available = true;
         header.recursion_desired = true;

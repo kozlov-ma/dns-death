@@ -148,7 +148,7 @@ impl<'a> DnsParser<'a> {
     }
 
     pub fn read_header(&mut self) -> Result<Header> {
-        let mut header = Header::empty();
+        let mut header = Header::new();
 
         header.id = self.read_u16()?;
         let first = self.read_u8()?;
