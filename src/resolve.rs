@@ -58,7 +58,7 @@ async fn recursive(
     };
 
     if !response.answers.is_empty() && response.header.rcode == ResponseCode::NoError {
-        let answers = cnames(query.clone(), response.answers, cache.clone()).await?;
+        let answers = cnames_if_needed(query.clone(), response.answers, cache.clone()).await?;
 
         let res = DnsResult::Answers(answers);
         return Ok(res);
@@ -73,7 +73,7 @@ async fn recursive(
 }
 
 #[async_recursion]
-async fn cnames(
+async fn cnames_if_needed(
     query: Query,
     answers: Vec<Record>,
     cache: Cache<Query, DnsResult>,
